@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Conveyor — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+:root {
+  --bg:      #080c10;
+  --surface: #0d1117;
+  --panel:   #111720;
+  --border:  rgba(255,255,255,0.07);
+  --accent:  #00c8ff;
+  --accent2: #0059b3;
+  --success: #00e87a;
+  --danger:  #ff3b55;
+  --warn:    #ffaa00;
+  --text:    #e8edf2;
+  --muted:   #5a6678;
+  --dim:     #1e2a3a;
+  --hdr:     52px;
+  --tab:     48px;
+  --gap:     10px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;width:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;-webkit-font-smoothing:antialiased}
+body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");opacity:.5}
+.blob{position:fixed;border-radius:50%;filter:blur(100px);pointer-events:none;z-index:0}
+.blob-1{width:400px;height:400px;background:rgba(0,89,179,.13);top:-100px;right:-80px}
+.blob-2{width:300px;height:300px;background:rgba(0,200,255,.06);bottom:-80px;left:-60px}
+
+/* ROOT */
+.root{position:relative;z-index:1;display:flex;flex-direction:column;height:100dvh;height:100vh}
+
+/* HEADER */
+header{flex-shrink:0;height:var(--hdr);display:flex;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--border);background:rgba(8,12,16,.92);backdrop-filter:blur(16px);gap:8px}
+.logo-zone{display:flex;align-items:center;gap:9px;flex-shrink:0}
+.logo-box{width:32px;height:32px;border-radius:7px;border:1px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;flex-shrink:0}
+.logo-box::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,200,255,.18),transparent 55%)}
+.logo-mark{width:14px;height:14px;border:1.5px solid var(--accent);border-radius:3px;transform:rotate(15deg);opacity:.85}
+.brand-name{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;line-height:1}
+.brand-sub{font-size:9px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase;margin-top:2px}
+.sys-status{display:flex;gap:10px;flex-shrink:0}
+.s-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);letter-spacing:.05em}
+.s-dot{width:6px;height:6px;border-radius:50%;animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.s-ok{background:var(--success);box-shadow:0 0 5px var(--success)}
+.s-err{background:var(--danger);box-shadow:0 0 5px var(--danger);animation:none}
+.auth-zone{display:flex;align-items:center;gap:6px}
+.auth-wrap{position:relative}
+.auth-input{background:var(--panel);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 10px 6px 28px;width:140px;outline:none;transition:border-color .2s,box-shadow .2s;letter-spacing:.08em}
+.auth-input::placeholder{color:var(--muted)}
+.auth-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,200,255,.1)}
+.auth-input.ok{border-color:var(--success);box-shadow:0 0 0 2px rgba(0,232,122,.1)}
+.auth-input.err{border-color:var(--danger)}
+.lock-ico{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:var(--muted);pointer-events:none}
+.auth-btn{background:var(--accent2);border:none;border-radius:7px;color:#fff;font-family:'Syne',sans-serif;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:6px 12px;cursor:pointer;transition:background .2s,transform .1s;white-space:nowrap}
+.auth-btn:hover{background:var(--accent)}
+.auth-btn:active{transform:scale(.97)}
+.auth-ok-badge{font-size:10px;letter-spacing:.07em;padding:5px 9px;border-radius:6px;background:rgba(0,232,122,.1);border:1px solid rgba(0,232,122,.2);color:var(--success);white-space:nowrap;display:none}
+
+/* CONTENT */
+.content{flex:1;min-height:0;display:flex;flex-direction:column}
+
+/* DESKTOP GRID */
+.desktop-grid{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:var(--gap);padding:var(--gap)}
+
+/* PANEL */
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px 14px;position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,200,255,.22),transparent)}
+.plabel{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);flex-shrink:0;margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.plabel::before{content:'';display:inline-block;width:14px;height:1px;background:var(--accent);opacity:.6}
+
+/* SNAP */
+.panel-snap{grid-column:1;grid-row:1/3}
+.snap-frame{flex:1;min-height:0;background:var(--panel);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;margin-bottom:10px;transition:border-color .4s}
+.snap-frame img{width:100%;height:100%;object-fit:cover;border-radius:7px}
+.scan-line{position:absolute;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,200,255,.5),transparent);animation:scan 3s linear infinite;pointer-events:none;z-index:1}
+@keyframes scan{0%{top:0;opacity:0}5%{opacity:1}95%{opacity:1}100%{top:100%;opacity:0}}
+.snap-ph{display:flex;flex-direction:column;align-items:center;gap:8px;opacity:.22}
+.snap-ph svg{width:32px;height:32px}
+.snap-ph span{font-size:10px;color:var(--muted);letter-spacing:.08em}
+.snap-bottom{flex-shrink:0;display:flex;flex-direction:column;gap:8px}
+.result-class{font-family:'Syne',sans-serif;font-size:clamp(20px,3vw,34px);font-weight:800;line-height:1}
+.conf-row{display:flex;align-items:center;gap:8px}
+.conf-lbl{font-size:10px;color:var(--muted);letter-spacing:.07em;flex-shrink:0}
+.conf-track{flex:1;height:3px;background:var(--dim);border-radius:2px;overflow:hidden}
+.conf-fill{height:100%;border-radius:2px;transition:width .5s cubic-bezier(.4,0,.2,1);width:0%}
+.conf-val{font-size:11px;min-width:30px;text-align:right;flex-shrink:0}
+.cycle-line{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:6px 10px}
+.cycle-lbl{font-size:10px;color:var(--muted)}
+.cycle-val{font-size:12px;font-weight:500}
+
+/* mini feed */
+.feed-wrap{flex-shrink:0;margin-top:8px;min-height:0}
+.feed-lbl{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:7px}
+.feed-lbl::before{content:'';display:inline-block;width:14px;height:1px;background:var(--accent);opacity:.6}
+.feed-list{display:flex;flex-direction:column;gap:4px}
+.fi{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:6px 9px;animation:fi-in .3s ease;transition:border-color .3s}
+.fi.new{border-color:rgba(0,200,255,.22)}
+@keyframes fi-in{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.fi-thumb{width:28px;height:28px;border-radius:5px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;flex-shrink:0}
+.fi-info{flex:1;min-width:0}
+.fi-class{font-size:11px;font-weight:500}
+.fi-meta{font-size:10px;color:var(--muted);margin-top:1px}
+.fi-badge{font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:4px;font-weight:600;flex-shrink:0}
+.ba{background:rgba(0,232,122,.1);color:#00e87a;border:1px solid rgba(0,232,122,.18)}
+.bb{background:rgba(0,200,255,.1);color:#00c8ff;border:1px solid rgba(0,200,255,.18)}
+.bc{background:rgba(255,170,0,.1);color:#ffaa00;border:1px solid rgba(255,170,0,.18)}
+.br{background:rgba(255,59,85,.1);color:#ff3b55;border:1px solid rgba(255,59,85,.18)}
+.feed-empty{font-size:10px;color:var(--muted);letter-spacing:.06em;text-align:center;padding:10px 0}
+
+/* COUNTS */
+.panel-counts{grid-column:2;grid-row:1}
+.counts-grid{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;gap:7px}
+.cnt{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:8px 10px;display:flex;flex-direction:column;justify-content:space-between}
+.cnt-wide{grid-column:span 2;flex-direction:row;align-items:center}
+.cnt-name{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.cnt-num{font-family:'Syne',sans-serif;font-size:clamp(16px,2.2vw,26px);font-weight:800;line-height:1;margin-top:3px}
+.cnt-bar{height:2px;background:var(--dim);border-radius:1px;overflow:hidden;margin-top:5px}
+.cnt-fill{height:100%;border-radius:1px;transition:width .5s}
+.fill-a{background:var(--success);box-shadow:0 0 5px var(--success)}
+.fill-b{background:var(--accent);box-shadow:0 0 5px var(--accent)}
+.fill-c{background:var(--warn);box-shadow:0 0 5px var(--warn)}
+.fill-r{background:var(--danger);box-shadow:0 0 5px var(--danger)}
+.cnt-right{text-align:right}
+.avg-lbl{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase}
+.avg-num{font-family:'Syne',sans-serif;font-size:clamp(14px,1.8vw,22px);font-weight:700;margin-top:3px}
+
+/* CMDS */
+.panel-cmds{grid-column:2;grid-row:2}
+.cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;flex:1;min-height:0}
+.cmd-btn{background:var(--panel);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.04em;padding:10px 12px;cursor:not-allowed;opacity:.32;transition:all .18s;text-align:left}
+.cmd-btn.on{cursor:pointer;opacity:1}
+.cmd-btn.on:hover{border-color:rgba(0,200,255,.3);background:rgba(0,200,255,.04)}
+.cmd-btn.on:active{transform:scale(.97)}
+.cmd-lbl{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:3px}
+.cmd-val{font-size:12px;font-weight:500}
+.v-a.on .cmd-val{color:var(--success)}
+.v-b.on .cmd-val{color:var(--accent)}
+.v-c.on .cmd-val{color:var(--warn)}
+.v-stop.on{border-color:rgba(255,59,85,.22)}
+.v-stop.on .cmd-val{color:var(--danger)}
+.v-stop.on:hover{background:rgba(255,59,85,.05)!important}
+.cmd-log{flex-shrink:0;font-size:10px;color:var(--muted);min-height:15px;margin-top:8px;letter-spacing:.05em}
+.log-ok{color:var(--success)}
+.log-err{color:var(--danger)}
+
+/* DEMO BAR */
+.demo-bar{flex-shrink:0;display:flex;gap:8px;justify-content:center;padding:6px 10px calc(6px + env(safe-area-inset-bottom,0px))}
+.demo-btn{background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.05em;padding:7px 16px;cursor:pointer;transition:all .18s}
+.demo-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── MOBILE ── */
+@media(max-width:700px){
+  :root{--hdr:48px;--tab:46px;--gap:8px}
+  .sys-status .s-item span{display:none}
+  .brand-sub{display:none}
+  .auth-input{width:110px}
+  .desktop-grid{display:none}
+
+  .mobile-tabs{flex-shrink:0;display:flex;border-bottom:1px solid var(--border);background:rgba(8,12,16,.92)}
+  .tab-btn{flex:1;height:var(--tab);background:transparent;border:none;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;position:relative;transition:color .2s}
+  .tab-btn.act{color:var(--accent)}
+  .tab-btn.act::after{content:'';position:absolute;bottom:0;left:15%;right:15%;height:1px;background:var(--accent)}
+
+  .mobile-pages{flex:1;min-height:0;position:relative}
+  .mob-page{position:absolute;inset:0;display:flex;flex-direction:column;padding:var(--gap);gap:var(--gap);overflow-y:auto;-webkit-overflow-scrolling:touch;opacity:0;pointer-events:none;transition:opacity .18s}
+  .mob-page.act{opacity:1;pointer-events:auto}
+
+  .mob-snap-frame{flex-shrink:0;background:var(--panel);border:1px solid var(--border);border-radius:10px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;transition:border-color .4s}
+  .mob-snap-frame img{width:100%;height:100%;object-fit:cover;border-radius:9px}
+  .mob-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;position:relative;overflow:hidden}
+  .mob-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,200,255,.2),transparent)}
+  .mob-counts{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:10px}
+  .mob-cnt{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:10px}
+  .mob-cnt-wide{grid-column:span 2;display:flex;justify-content:space-between;align-items:center}
+  .mob-cnt-name{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px}
+  .mob-cnt-num{font-family:'Syne',sans-serif;font-size:26px;font-weight:800;line-height:1}
+  .mob-cnt-bar{height:2px;background:var(--dim);border-radius:1px;overflow:hidden;margin-top:5px}
+  .mob-cnt-fill{height:100%;border-radius:1px;transition:width .5s}
+  .mob-cmd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .mob-cmd-btn{background:var(--panel);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;padding:13px 12px;cursor:not-allowed;opacity:.32;transition:all .18s;text-align:left}
+  .mob-cmd-btn.on{cursor:pointer;opacity:1}
+  .mob-cmd-btn.on:active{transform:scale(.97)}
+  .mob-cmd-lbl{font-size:9px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:3px}
+  .mob-cmd-val{font-size:12px;font-weight:500}
+}
+@media(min-width:701px){
+  .mobile-tabs,.mobile-pages{display:none}
+}
+</style>
+</head>
+<body>
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+<div class="root">
+
+<!-- HEADER -->
+<header>
+  <div class="logo-zone">
+    <div class="logo-box"><div class="logo-mark"></div></div>
+    <div>
+      <div class="brand-name">Conveyor</div>
+      <div class="brand-sub">Vision v1.0</div>
+    </div>
+  </div>
+  <div class="sys-status">
+    <div class="s-item"><div class="s-dot s-err" id="dot-arduino"></div><span>Arduino</span></div>
+    <div class="s-item"><div class="s-dot s-err" id="dot-camera"></div><span>Камера</span></div>
+    <div class="s-item"><div class="s-dot s-err" id="dot-nn"></div><span>Сеть</span></div>
+  </div>
+  <div class="auth-zone">
+    <div class="auth-wrap">
+      <svg class="lock-ico" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="1.5" y="5.5" width="9" height="6" rx="1.5"/>
+        <path d="M3.5 5.5V4a2.5 2.5 0 015 0v1.5"/>
+      </svg>
+      <input class="auth-input" type="password" id="pwd" placeholder="Пароль" autocomplete="off">
+    </div>
+    <button class="auth-btn" onclick="tryAuth()">Войти</button>
+    <div class="auth-ok-badge" id="auth-ok">Доступ открыт</div>
+  </div>
+</header>
+
+<div class="content">
+
+  <!-- MOBILE TABS -->
+  <div class="mobile-tabs">
+    <button class="tab-btn act" onclick="showTab(0)">Снимок</button>
+    <button class="tab-btn" onclick="showTab(1)">Счётчики</button>
+    <button class="tab-btn" onclick="showTab(2)">Команды</button>
+    <button class="tab-btn" onclick="showTab(3)">Лента</button>
+  </div>
+
+  <!-- MOBILE PAGES -->
+  <div class="mobile-pages">
+    <div class="mob-page act" id="mp0">
+      <div class="mob-snap-frame" id="mob-snap">
+        <div class="scan-line"></div>
+        <div id="mob-ph" class="snap-ph">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.2">
+            <rect x="3" y="8" width="26" height="20" rx="3"/>
+            <circle cx="16" cy="18" r="6"/>
+            <path d="M11 8l2-4h6l2 4"/>
+          </svg>
+          <span>ожидание объекта</span>
+        </div>
+      </div>
+      <div class="mob-panel">
+        <div class="plabel">Результат</div>
+        <div class="result-class" id="mob-class" style="margin-bottom:8px">—</div>
+        <div class="conf-row" style="margin-bottom:8px">
+          <span class="conf-lbl">Уверенность</span>
+          <div class="conf-track"><div class="conf-fill" id="mob-conf-fill"></div></div>
+          <span class="conf-val" id="mob-conf-val">—</span>
+        </div>
+        <div class="cycle-line">
+          <span class="cycle-lbl">Время цикла</span>
+          <span class="cycle-val" id="mob-cycle">—</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mob-page" id="mp1">
+      <div class="mob-panel">
+        <div class="plabel">Статистика сессии</div>
+        <div class="mob-counts">
+          <div class="mob-cnt"><div class="mob-cnt-name">Класс A</div><div class="mob-cnt-num" id="mob-ca">0</div><div class="mob-cnt-bar"><div class="mob-cnt-fill fill-a" id="mob-ba" style="width:0%"></div></div></div>
+          <div class="mob-cnt"><div class="mob-cnt-name">Класс B</div><div class="mob-cnt-num" id="mob-cb">0</div><div class="mob-cnt-bar"><div class="mob-cnt-fill fill-b" id="mob-bb" style="width:0%"></div></div></div>
+          <div class="mob-cnt"><div class="mob-cnt-name">Класс C</div><div class="mob-cnt-num" id="mob-cc">0</div><div class="mob-cnt-bar"><div class="mob-cnt-fill fill-c" id="mob-bc" style="width:0%"></div></div></div>
+          <div class="mob-cnt"><div class="mob-cnt-name">Брак</div><div class="mob-cnt-num" id="mob-cr">0</div><div class="mob-cnt-bar"><div class="mob-cnt-fill fill-r" id="mob-br" style="width:0%"></div></div></div>
+          <div class="mob-cnt mob-cnt-wide">
+            <div><div class="mob-cnt-name">Всего</div><div class="mob-cnt-num" id="mob-total">0</div></div>
+            <div style="text-align:right"><div class="mob-cnt-name">Среднее время</div><div class="mob-cnt-num" id="mob-avg">—</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mob-page" id="mp2">
+      <div class="mob-panel">
+        <div class="plabel">Управление конвейером</div>
+        <div class="mob-cmd-grid">
+          <button class="mob-cmd-btn v-a" id="mob-cmd-a" onclick="sendCmd('DROP_A')"><span class="mob-cmd-lbl">Команда</span><span class="mob-cmd-val" style="color:var(--success)">CMD:DROP_A</span></button>
+          <button class="mob-cmd-btn v-b" id="mob-cmd-b" onclick="sendCmd('DROP_B')"><span class="mob-cmd-lbl">Команда</span><span class="mob-cmd-val" style="color:var(--accent)">CMD:DROP_B</span></button>
+          <button class="mob-cmd-btn v-c" id="mob-cmd-c" onclick="sendCmd('DROP_C')"><span class="mob-cmd-lbl">Команда</span><span class="mob-cmd-val" style="color:var(--warn)">CMD:DROP_C</span></button>
+          <button class="mob-cmd-btn v-stop" id="mob-cmd-stop" onclick="sendCmd('STOP')"><span class="mob-cmd-lbl">Аварийная</span><span class="mob-cmd-val" style="color:var(--danger)">CMD:STOP</span></button>
+        </div>
+        <div class="cmd-log" id="mob-log" style="margin-top:10px"></div>
+      </div>
+    </div>
+
+    <div class="mob-page" id="mp3">
+      <div class="mob-panel">
+        <div class="plabel">Лента объектов</div>
+        <div class="feed-list" id="mob-feed"><div class="feed-empty">Объекты ещё не поступали...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DESKTOP GRID -->
+  <div class="desktop-grid">
+
+    <div class="panel panel-snap">
+      <div class="plabel">Последний объект</div>
+      <div class="snap-frame" id="d-snap">
+        <div class="scan-line"></div>
+        <div id="d-ph" class="snap-ph">
+          <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.2">
+            <rect x="3" y="8" width="26" height="20" rx="3"/>
+            <circle cx="16" cy="18" r="6"/>
+            <path d="M11 8l2-4h6l2 4"/>
+          </svg>
+          <span>ожидание объекта</span>
+        </div>
+      </div>
+      <div class="snap-bottom">
+        <div class="result-class" id="d-class">—</div>
+        <div class="conf-row">
+          <span class="conf-lbl">Уверенность</span>
+          <div class="conf-track"><div class="conf-fill" id="d-conf-fill"></div></div>
+          <span class="conf-val" id="d-conf-val">—</span>
+        </div>
+        <div class="cycle-line">
+          <span class="cycle-lbl">Время цикла</span>
+          <span class="cycle-val" id="d-cycle">—</span>
+        </div>
+        <div class="feed-wrap">
+          <div class="feed-lbl">Лента</div>
+          <div class="feed-list" id="d-feed"><div class="feed-empty">Объекты ещё не поступали...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel-counts">
+      <div class="plabel">Статистика сессии</div>
+      <div class="counts-grid">
+        <div class="cnt"><div class="cnt-name">Класс A</div><div class="cnt-num" id="d-ca">0</div><div class="cnt-bar"><div class="cnt-fill fill-a" id="d-ba" style="width:0%"></div></div></div>
+        <div class="cnt"><div class="cnt-name">Класс B</div><div class="cnt-num" id="d-cb">0</div><div class="cnt-bar"><div class="cnt-fill fill-b" id="d-bb" style="width:0%"></div></div></div>
+        <div class="cnt"><div class="cnt-name">Класс C</div><div class="cnt-num" id="d-cc">0</div><div class="cnt-bar"><div class="cnt-fill fill-c" id="d-bc" style="width:0%"></div></div></div>
+        <div class="cnt"><div class="cnt-name">Брак</div><div class="cnt-num" id="d-cr">0</div><div class="cnt-bar"><div class="cnt-fill fill-r" id="d-br" style="width:0%"></div></div></div>
+        <div class="cnt cnt-wide">
+          <div><div class="cnt-name">Всего объектов</div><div class="cnt-num" id="d-total">0</div></div>
+          <div class="cnt-right"><div class="avg-lbl">Среднее время</div><div class="avg-num" id="d-avg">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel panel-cmds">
+      <div class="plabel">Управление конвейером</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn v-a" id="d-cmd-a" onclick="sendCmd('DROP_A')"><span class="cmd-lbl">Команда</span><span class="cmd-val">CMD:DROP_A</span></button>
+        <button class="cmd-btn v-b" id="d-cmd-b" onclick="sendCmd('DROP_B')"><span class="cmd-lbl">Команда</span><span class="cmd-val">CMD:DROP_B</span></button>
+        <button class="cmd-btn v-c" id="d-cmd-c" onclick="sendCmd('DROP_C')"><span class="cmd-lbl">Команда</span><span class="cmd-val">CMD:DROP_C</span></button>
+        <button class="cmd-btn v-stop" id="d-cmd-stop" onclick="sendCmd('STOP')"><span class="cmd-lbl">Аварийная</span><span class="cmd-val">CMD:STOP</span></button>
+      </div>
+      <div class="cmd-log" id="d-log"></div>
+    </div>
+
+  </div>
+
+  <div class="demo-bar">
+    <button class="demo-btn" onclick="resetAll()">Сбросить сессию</button>
+  </div>
+
+</div><!-- /content -->
+</div><!-- /root -->
+
+<script>
+// ── Константы UI ──────────────────────────────────────────────
+const COLORS = ['var(--success)', 'var(--accent)', 'var(--warn)', 'var(--danger)'];
+const BDGE   = ['ba', 'bb', 'bc', 'br'];
+const RGBA   = ['0,232,122', '0,200,255', '255,170,0', '255,59,85'];
+const CLS_LABELS = {A:'A', B:'B', C:'C', reject:'Брак'};
+const CLS_IDX    = {A:0, B:1, C:2, reject:3};
+
+// ── Auth ──────────────────────────────────────────────────────
+let currentPassword = '';
+let unlocked = false;
+
+function tryAuth() {
+  currentPassword = document.getElementById('pwd').value;
+  unlocked = true;
+  document.getElementById('pwd').classList.add('ok');
+  document.getElementById('pwd').classList.remove('err');
+  document.getElementById('auth-ok').style.display = 'block';
+  ['d-cmd-a','d-cmd-b','d-cmd-c','d-cmd-stop',
+   'mob-cmd-a','mob-cmd-b','mob-cmd-c','mob-cmd-stop']
+    .forEach(id => { const e = document.getElementById(id); if (e) e.classList.add('on'); });
+  setLog('<span class="log-ok">// Доступ открыт — команды активны</span>');
+}
+document.getElementById('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') tryAuth(); });
+
+// ── Log helper ────────────────────────────────────────────────
+function setLog(h) {
+  ['d-log','mob-log'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = h; });
+}
+
+// ── Команды ───────────────────────────────────────────────────
+function sendCmd(cmd) {
+  if (!unlocked) return;
+  fetch('/api/cmd', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Password': currentPassword },
+    body: JSON.stringify({ cmd })
+  })
+    .then(r => {
+      if (r.ok) {
+        setLog(`<span class="log-ok">// CMD:${cmd} → OK</span>`);
+      } else {
+        setLog(`<span class="log-err">// Ошибка ${r.status}${r.status === 403 ? ' (неверный пароль)' : ''}</span>`);
+        if (r.status === 403) {
+          document.getElementById('pwd').classList.add('err');
+          document.getElementById('pwd').classList.remove('ok');
+        }
+      }
+      setTimeout(() => setLog('<span style="color:var(--muted)">// Ожидание команды...</span>'), 3000);
+    })
+    .catch(e => setLog(`<span class="log-err">// Сеть: ${e}</span>`));
+}
+
+// ── Сброс сессии ──────────────────────────────────────────────
+function resetAll() {
+  fetch('/api/reset', { method: 'POST' })
+    .then(() => applyReset())
+    .catch(() => applyReset());
+}
+
+function applyReset() {
+  ['a','b','c','r'].forEach(k => {
+    ['d-c','mob-c'].forEach(px => { const e = document.getElementById(px+k); if (e) e.textContent = '0'; });
+    ['d-b','mob-b'].forEach(px => { const e = document.getElementById(px+k); if (e) e.style.width = '0%'; });
+  });
+  ['d-total','mob-total'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '0'; });
+  ['d-avg','mob-avg'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '—'; });
+  ['d-class','mob-class'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '—'; });
+  ['d-conf-fill','mob-conf-fill'].forEach(id => { const e = document.getElementById(id); if (e) { e.style.width = '0%'; e.style.background = ''; } });
+  ['d-conf-val','mob-conf-val'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '—'; });
+  ['d-cycle','mob-cycle'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '—'; });
+  // Snap frames → placeholder
+  setSnapPlaceholder('d-snap', 'd-ph');
+  setSnapPlaceholder('mob-snap', 'mob-ph');
+  ['d-feed','mob-feed'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.innerHTML = '<div class="feed-empty">Объекты ещё не поступали...</div>';
+  });
+  setLog('');
+}
+
+// ── SocketIO ──────────────────────────────────────────────────
+const socket = io();
+
+socket.on('connect', () => {
+  console.log('SocketIO connected');
+});
+
+socket.on('new_result', data => updateUI(data));
+socket.on('status', data => updateStatus(data));
+
+// ── updateUI ──────────────────────────────────────────────────
+function updateUI(data) {
+  const cls   = data.class_name || 'reject';
+  const ci    = CLS_IDX[cls] !== undefined ? CLS_IDX[cls] : 3;
+  const color = COLORS[ci];
+  const conf  = data.confidence || 0;
+  const pct   = Math.round(conf * 100);
+  const cycleS = data.cycle_ms ? (data.cycle_ms / 1000).toFixed(2) + ' с' : '—';
+  const label = CLS_LABELS[cls] || cls;
+
+  // Snap image
+  if (data.image_b64) {
+    setSnapImage('d-snap',   'd-ph',   data.image_b64, ci);
+    setSnapImage('mob-snap', 'mob-ph', data.image_b64, ci);
+  }
+
+  // Класс
+  ['d-class','mob-class'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.innerHTML = `Класс <span style="color:${color}">${label}</span>`;
+  });
+
+  // Уверенность
+  ['d-conf-fill','mob-conf-fill'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) { e.style.width = pct + '%'; e.style.background = color; e.style.boxShadow = `0 0 7px ${color}`; }
+  });
+  ['d-conf-val','mob-conf-val'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.textContent = pct + '%';
+  });
+
+  // Цикл
+  ['d-cycle','mob-cycle'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.textContent = cycleS;
+  });
+
+  // Счётчики
+  const counts = data.counts || {};
+  const total  = data.total  || 0;
+  ['a','b','c','r'].forEach((k, i) => {
+    const clsKey = ['A','B','C','reject'][i];
+    const cnt = counts[clsKey] || 0;
+    const barPct = total > 0 ? Math.round(cnt / total * 100) : 0;
+    ['d-c','mob-c'].forEach(px => { const e = document.getElementById(px+k); if (e) e.textContent = cnt; });
+    ['d-b','mob-b'].forEach(px => { const e = document.getElementById(px+k); if (e) e.style.width = barPct + '%'; });
+  });
+  ['d-total','mob-total'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = total; });
+  const avg = data.avg_cycle_ms;
+  const avgStr = avg ? (avg / 1000).toFixed(2) + ' с' : '—';
+  ['d-avg','mob-avg'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = avgStr; });
+
+  // Feed
+  const now = new Date(data.timestamp * 1000).toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const mkItem = () => {
+    const d = document.createElement('div');
+    d.className = 'fi new';
+    d.innerHTML = `<div class="fi-thumb" style="color:${color}">${label}</div>`
+      + `<div class="fi-info"><div class="fi-class" style="color:${color}">Класс ${label}</div>`
+      + `<div class="fi-meta">${now} · ${Math.round(data.cycle_ms || 0)} мс · ${pct}%</div></div>`
+      + `<span class="fi-badge ${BDGE[ci]}">${label}</span>`;
+    setTimeout(() => d.classList.remove('new'), 400);
+    return d;
+  };
+  ['d-feed','mob-feed'].forEach((id, idx) => {
+    const feed = document.getElementById(id); if (!feed) return;
+    const empty = feed.querySelector('.feed-empty'); if (empty) empty.remove();
+    feed.insertBefore(mkItem(), feed.firstChild);
+    const max = idx === 0 ? 4 : 8;
+    while (feed.children.length > max) feed.removeChild(feed.lastChild);
+  });
+}
+
+// ── Snap-frame helpers ────────────────────────────────────────
+function setSnapImage(frameId, phId, b64, ci) {
+  const frame = document.getElementById(frameId);
+  if (!frame) return;
+  // Убираем placeholder
+  const ph = document.getElementById(phId);
+  if (ph) ph.style.display = 'none';
+  // Находим или создаём <img>
+  let img = frame.querySelector('img.snap-img');
+  if (!img) {
+    img = document.createElement('img');
+    img.className = 'snap-img';
+    frame.appendChild(img);
+  }
+  img.src = 'data:image/jpeg;base64,' + b64;
+  frame.style.borderColor = `rgba(${RGBA[ci]},.3)`;
+}
+
+function setSnapPlaceholder(frameId, phId) {
+  const frame = document.getElementById(frameId);
+  if (!frame) return;
+  const img = frame.querySelector('img.snap-img');
+  if (img) img.remove();
+  const ph = document.getElementById(phId);
+  if (ph) ph.style.display = 'flex';
+  frame.style.borderColor = '';
+}
+
+// ── updateStatus ──────────────────────────────────────────────
+function updateStatus(data) {
+  const map = { arduino: 'dot-arduino', camera: 'dot-camera', nn: 'dot-nn' };
+  Object.entries(map).forEach(([key, dotId]) => {
+    const dot = document.getElementById(dotId);
+    if (!dot) return;
+    const ok = data[key] === true;
+    dot.classList.toggle('s-ok', ok);
+    dot.classList.toggle('s-err', !ok);
+  });
+}
+
+// ── Tabs (mobile) ─────────────────────────────────────────────
+function showTab(n) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('act', i === n));
+  document.querySelectorAll('.mob-page').forEach((p, i) => p.classList.toggle('act', i === n));
+}
+</script>
+</body>
+</html>

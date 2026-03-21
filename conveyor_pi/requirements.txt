@@ -1,0 +1,8 @@
+picamera2
+tflite-runtime
+pyserial
+flask>=3.0
+flask-socketio>=5.3
+eventlet>=0.35
+numpy>=1.24
+Pillow>=10.0
