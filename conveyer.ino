@@ -63,12 +63,12 @@ int object_count = 0;
 void setup() {
   Serial.begin(115200);
   Wire.begin();
-  
+
   // Инициализация пинов
   pinMode(CONVEYOR_PIN, OUTPUT);
   pinMode(LIGHT_PIN, OUTPUT);
   digitalWrite(LIGHT_PIN, LOW);
-  
+
   // Инициализация VL53L0X
   Serial.println("Initializing VL53L0X...");
   if (!sensor.init()) {
@@ -80,49 +80,49 @@ void setup() {
       delay(100);
     }
   }
-  
+
   sensor.setTimeout(500);
   sensor.setMeasurementTimingBudget(200000);
   sensor.startContinuous(30);
-  
+
   // Инициализация PCA9685
   Serial.println("Initializing PCA9685...");
   pwm.begin();
   pwm.setPWMFreq(50);
-  
+
   // Убираем все серво в исходное положение
   Serial.println("Setting servos to retract position...");
   for(int i = 0; i < 3; i++) {
     setServo(i, SERVO_RETRACT_ANGLE);
   }
-  
+
   delay(500);
-  
+
   // Рассчитываем PWM для транспортировки
   transport_pwm = (int)((transport_speed / MAX_CONVEYOR_SPEED) * CONVEYOR_PWM_MAX);
-  
+
   // Запуск конвейера на скорости холостого хода
   setIdleSpeed(idle_speed);
   useIdleSpeed();
   startConveyor();
-  
+
   printHelp();
   printConfig();
 }
 
 void loop() {
   int distance = sensor.readRangeContinuousMillimeters();
-  
+
   // Проверка команд по Serial
   checkSerialCommands();
-  
+
   // Машина состояний
   switch(current_state) {
-    
+
     case STOPPED:
       // Система остановлена
       break;
-    
+
     case SCANNING:
       // Сканируем ленту на наличие объектов
       if (!sensor.timeoutOccurred() && distance < DETECTION_THRESHOLD) {
@@ -132,20 +132,11 @@ void loop() {
         objectDetected();
       }
       break;
-    
-    case OBJECT_DETECTED:
-      // Ждём 1 секунду с включенным светом
-      if (millis() - state_timer >= 1000) {
-        digitalWrite(LIGHT_PIN, LOW);
-        current_state = WAITING_DECISION;
-        Serial.println("READY: Send 0/1/2 (servo), 3 (end), or RETRY");
-      }
-      break;
-    
+
     case WAITING_DECISION:
       // Ждём команду по Serial
       break;
-    
+
     case MOVING_TO_SERVO:
       // Ждём пока объект доедет до выталкивателя
       if (millis() - state_timer >= calculateTravelTime(target_servo)) {
@@ -153,14 +144,14 @@ void loop() {
         pushObject(target_servo);
       }
       break;
-    
+
     case PUSHING:
       // Ждём окончания выталкивания
       if (millis() - state_timer >= PUSH_DURATION) {
         // Убираем выталкиватель (плавно)
         setServo(target_servo, SERVO_RETRACT_ANGLE);
         delay(300);
-        
+
         Serial.println("Ready for next object\n");
         useIdleSpeed();  // Возврат на скорость холостого хода
         startConveyor();
@@ -168,14 +159,14 @@ void loop() {
         target_servo = -1;
       }
       break;
-    
+
     case MOVING_TO_END:
       // Везём объект в конец ленты (слот 3)
       if (millis() - state_timer >= calculateTravelTimeToEnd()) {
         stopConveyor();
         Serial.println("Object reached end (slot 3)");
         delay(300);
-        
+
         Serial.println("Ready for next object\n");
         useIdleSpeed();  // Возврат на скорость холостого хода
         startConveyor();
@@ -183,7 +174,7 @@ void loop() {
       }
       break;
   }
-  
+
   delay(10);
 }
 
@@ -193,13 +184,27 @@ void checkSerialCommands() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
     cmd.toUpperCase();
-    
+
+      // Команда LIGHT_ON
+    if (cmd == "LON") {
+      digitalWrite(LIGHT_PIN, HIGH);
+      Serial.println("Light ON");
+      return;
+    }
+
+    // Команда LIGHT_OFF
+    if (cmd == "LOFF") {
+      digitalWrite(LIGHT_PIN, LOW);
+      Serial.println("Light OFF");
+      return;
+    }
+
     // Команда STOP - работает всегда
     if (cmd == "STOP" || cmd == "X") {
       emergencyStop();
       return;
     }
-    
+
     // Команда START - работает всегда
     if (cmd == "START") {
       if (current_state == STOPPED) {
@@ -209,7 +214,7 @@ void checkSerialCommands() {
       }
       return;
     }
-    
+
     // Команда SPEED=XX - работает всегда
     if (cmd.startsWith("SPEED=")) {
       float new_speed = cmd.substring(6).toFloat();
@@ -221,7 +226,7 @@ void checkSerialCommands() {
       }
       return;  // ВАЖНО: выход из функции
     }
-    
+
     // Команда PWM=XXX - работает всегда
     if (cmd.startsWith("PWM=")) {
       int new_pwm = cmd.substring(4).toInt();
@@ -233,28 +238,28 @@ void checkSerialCommands() {
       }
       return;  // ВАЖНО: выход из функции
     }
-    
+
     // Команда INFO - работает всегда
     if (cmd == "INFO" || cmd == "I") {
       printConfig();
       return;
     }
-    
+
     // Команда HELP - работает всегда
     if (cmd == "HELP" || cmd == "H" || cmd == "?") {
       printHelp();
       return;
     }
-    
+
     // Проверка что система не остановлена (для команд 0/1/2/3/RETRY)
     if (current_state == STOPPED) {
       Serial.println("System STOPPED. Send START to resume");
       return;
     }
-    
+
     // Команды в режиме WAITING_DECISION
     if (current_state == WAITING_DECISION) {
-      
+
       // Серво 0
       if (cmd == "0") {
         target_servo = 0;
@@ -266,7 +271,7 @@ void checkSerialCommands() {
         moveToServo(0);
         return;
       }
-      
+
       // Серво 1
       if (cmd == "1") {
         target_servo = 1;
@@ -278,7 +283,7 @@ void checkSerialCommands() {
         moveToServo(1);
         return;
       }
-      
+
       // Серво 2
       if (cmd == "2") {
         target_servo = 2;
@@ -290,7 +295,7 @@ void checkSerialCommands() {
         moveToServo(2);
         return;
       }
-      
+
       // Слот 3 - конец ленты
       if (cmd == "3") {
         Serial.print("Moving to end slot 3 (");
@@ -301,7 +306,7 @@ void checkSerialCommands() {
         moveToEnd();
         return;
       }
-      
+
       // RETRY
       if (cmd == "RETRY" || cmd == "R") {
         Serial.println(">>> RETRY - Restarting detection <<<");
@@ -311,12 +316,12 @@ void checkSerialCommands() {
         target_servo = -1;
         return;
       }
-      
+
       // Неизвестная команда в режиме WAITING_DECISION
       Serial.println("Invalid! Use 0/1/2/3 or RETRY");
       return;
     }
-    
+
     // Если дошли сюда - неизвестная команда в другом состоянии
     // НЕ выводим "Command only available when object detected"
     // Просто игнорируем или выводим общую ошибку
@@ -330,7 +335,7 @@ void setIdleSpeed(float speed_mm_s) {
   speed_mm_s = constrain(speed_mm_s, 0, MAX_CONVEYOR_SPEED);
   idle_speed = speed_mm_s;
   idle_pwm = (int)((idle_speed / MAX_CONVEYOR_SPEED) * CONVEYOR_PWM_MAX);
-  
+
   Serial.print("Idle speed set to ");
   Serial.print(idle_speed, 1);
   Serial.print(" mm/s (PWM: ");
@@ -343,7 +348,7 @@ void setIdlePWM(int pwm_value) {
   pwm_value = constrain(pwm_value, 0, 255);
   idle_pwm = pwm_value;
   idle_speed = (pwm_value / (float)CONVEYOR_PWM_MAX) * MAX_CONVEYOR_SPEED;
-  
+
   Serial.print("Idle PWM set to ");
   Serial.print(idle_pwm);
   Serial.print(" (speed: ");
@@ -367,7 +372,7 @@ void useTransportSpeed() {
 void setServoSmooth(int channel, int target_angle) {
   target_angle = constrain(target_angle, 0, 180);
   int current = servo_angles[channel];
-  
+
   if (current < target_angle) {
     // Выдвигаем
     for(int angle = current; angle <= target_angle; angle++) {
@@ -383,7 +388,7 @@ void setServoSmooth(int channel, int target_angle) {
       delay(SERVO_SPEED_DELAY);
     }
   }
-  
+
   servo_angles[channel] = target_angle;
 }
 
@@ -415,7 +420,7 @@ void emergencyStop() {
   current_state = STOPPED;
   stopConveyor();
   digitalWrite(LIGHT_PIN, LOW);
-  
+
   Serial.println("\n!!! EMERGENCY STOP !!!");
   Serial.println("Send START to resume\n");
 }
@@ -423,18 +428,18 @@ void emergencyStop() {
 // Возобновление работы
 void resumeFromStop() {
   Serial.println("Resuming...");
-  
+
   // Плавно убираем все серво
   for(int i = 0; i < 3; i++) {
     setServo(i, SERVO_RETRACT_ANGLE);
   }
-  
+
   target_servo = -1;
-  digitalWrite(LIGHT_PIN, LOW);
+ // digitalWrite(LIGHT_PIN, LOW);
   current_state = SCANNING;
   useIdleSpeed();  // Возврат на скорость холостого хода
   startConveyor();
-  
+
   Serial.println("System RESUMED\n");
 }
 
@@ -442,16 +447,15 @@ void resumeFromStop() {
 void objectDetected() {
   object_count++;
   stopConveyor();
-  
+
   Serial.println("\n==================");
   Serial.print("OBJECT #");
   Serial.print(object_count);
   Serial.println(" DETECTED");
   Serial.println("==================");
-  
-  digitalWrite(LIGHT_PIN, HIGH);
-  
-  current_state = OBJECT_DETECTED;
+  Serial.println("READY: Send 0/1/2 (servo), 3 (end), or RETRY");
+
+  current_state = WAITING_DECISION;
   state_timer = millis();
 }
 
@@ -477,10 +481,10 @@ void pushObject(int servo_num) {
   Serial.print(">>> Pushing at servo ");
   Serial.print(servo_num);
   Serial.println(" <<<");
-  
+
   // Плавно выталкиваем
   setServo(servo_num, SERVO_PUSH_ANGLE);
-  
+
   current_state = PUSHING;
   state_timer = millis();
 }

@@ -1,57 +1,47 @@
 import base64
 import logging
+import threading
 import time
 
 import serial
 
-from config import SERIAL_PORT, SERIAL_BAUD, _CMD_MAP, _REST_MAP
+from config import _CMD_MAP, _REST_MAP, SERIAL_BAUD, SERIAL_PORT
 
 logger = logging.getLogger(__name__)
 
-_RECONNECT_DELAY = 5  # секунд между попытками переподключения
+_RECONNECT_DELAY = 5
 
 
 class SerialManager:
-    def __init__(self, camera, classifier, state, socketio):
+    def __init__(self, camera, classifier, state, socketio, ser=None):
         self._camera = camera
         self._classifier = classifier
         self._state = state
         self._socketio = socketio
-        self._serial: serial.Serial | None = None
+        self._serial = ser  # используем уже открытый порт
         self._running = False
 
-    # ──────────────────────────────────────────────
-    # Подключение
-    # ──────────────────────────────────────────────
-
     def _connect(self) -> bool:
-        """Попытаться открыть Serial-порт. Возвращает True при успехе."""
-        try:
-            self._serial = serial.Serial(
-                SERIAL_PORT,
-                SERIAL_BAUD,
-                timeout=30,
-            )
+        if self._serial and self._serial.is_open:
             self._state.status["arduino"] = True
-            self._emit_status()
+            # Не emit здесь — статус обновится при следующем on_connect
+            logger.info("Using existing serial port: %s", self._serial.port)
+            return True
+        try:
+            self._serial = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=1)
+            self._state.status["arduino"] = True
             logger.info("Serial connected: %s @ %d baud", SERIAL_PORT, SERIAL_BAUD)
             return True
         except serial.SerialException as e:
             self._serial = None
             self._state.status["arduino"] = False
-            self._emit_status()
             logger.error("Serial connect failed (%s): %s", SERIAL_PORT, e)
             return False
 
     def _is_open(self) -> bool:
         return self._serial is not None and self._serial.is_open
 
-    # ──────────────────────────────────────────────
-    # Отправка команд
-    # ──────────────────────────────────────────────
-
     def _send_raw(self, cmd: str) -> None:
-        """Отправить строку в Arduino (добавляет \n)."""
         if not self._is_open():
             logger.warning("Cannot send '%s': port not open", cmd)
             return
@@ -65,23 +55,17 @@ class SerialManager:
             self._emit_status()
 
     def _send_drop(self, class_name: str) -> None:
-        """Отправить команду сброса по результату классификации."""
-        cmd = _CMD_MAP.get(class_name, "3")  # неизвестный класс → конец ленты
+        cmd = _CMD_MAP.get(class_name, "3")
         self._send_raw(cmd)
         logger.info("DROP %s → Arduino cmd '%s'", class_name, cmd)
 
     def send_manual_cmd(self, cmd: str) -> None:
-        """REST /api/cmd: принимает 'DROP_A'/'DROP_B'/'DROP_C'/'DROP_REJ'/'STOP'."""
-        raw = _REST_MAP.get(cmd.upper())
-        if raw is None:
+        allowed = {"START", "STOP"}
+        if cmd.upper() not in allowed:
             logger.warning("Unknown manual cmd: %s", cmd)
             return
-        self._send_raw(raw)
-        logger.info("Manual cmd: %s → '%s'", cmd, raw)
-
-    # ──────────────────────────────────────────────
-    # SocketIO helpers
-    # ──────────────────────────────────────────────
+        self._send_raw(cmd.upper())
+        logger.info("Manual cmd: %s", cmd)
 
     def _emit_status(self) -> None:
         try:
@@ -89,32 +73,29 @@ class SerialManager:
         except Exception as e:
             logger.debug("socketio emit status error: %s", e)
 
-    # ──────────────────────────────────────────────
-    # Основной цикл
-    # ──────────────────────────────────────────────
-
     def run_loop(self) -> None:
-        """
-        Блокирующий главный цикл. Читает строки от Arduino и реагирует:
-
-          "READY: ..."   → захват → классификация → отправить команду → emit
-          "Ready for next..." → лог (цикл завершён)
-          "ERROR..."     → лог ошибки
-
-        Serial.timeout=30 с — при истечении readline() вернёт b'',
-        цикл логирует предупреждение и продолжает (не падает).
-        """
+        """Запускает Serial-цикл в настоящем OS-потоке, минуя eventlet."""
         self._running = True
-        logger.info("Serial run_loop started")
+        t = threading.Thread(target=self._serial_thread, daemon=False)
+        t.start()
+        t.join()
+
+    def _serial_thread(self) -> None:
+        logger.info("Serial thread started (native OS thread)")
+        last_status_emit = 0
 
         while self._running:
-            # ── Переподключение ──────────────────
             if not self._is_open():
                 if not self._connect():
                     time.sleep(_RECONNECT_DELAY)
                     continue
 
-            # ── Чтение строки ────────────────────
+            # Периодически шлём статус (каждые 3 секунды)
+            now = time.time()
+            if now - last_status_emit > 3:
+                self._emit_status()
+                last_status_emit = now
+
             try:
                 raw = self._serial.readline()
             except serial.SerialException as e:
@@ -132,15 +113,13 @@ class SerialManager:
             line = raw.decode(errors="replace").strip()
 
             if not line:
-                # readline() вернул пустую строку — таймаут 30 с
-                logger.warning("Serial timeout (30 s) — no data from Arduino")
                 continue
 
             logger.debug("← Arduino: %s", line)
 
-            # ── Разбор строки ────────────────────
             try:
                 if "READY:" in line:
+                    logger.info("Arduino READY — capturing...")
                     self._handle_ready()
                 elif "Ready for next" in line:
                     logger.info("Arduino: cycle complete")
@@ -149,18 +128,25 @@ class SerialManager:
                     self._state.status["arduino"] = False
                     self._emit_status()
                 else:
-                    logger.debug("Arduino unhandled: %s", line)
-
-            except KeyboardInterrupt:
-                break
+                    logger.debug("Arduino: %s", line)
             except Exception:
-                logger.exception("Exception in run_loop handler (continuing)")
+                logger.exception("Exception in serial handler (continuing)")
+
+    def _light_on(self) -> None:
+        self._send_raw("LON")
+        logger.debug("Light ON")
+
+    def _light_off(self) -> None:
+        self._send_raw("LOFF")
+        logger.debug("Light OFF")
 
     def _handle_ready(self) -> None:
-        """Обработчик EVT:READY — захват, классификация, отправка, emit."""
         t0 = time.time()
 
-        # 1. Захват кадра
+        # Включаем свет
+        self._light_on()
+        time.sleep(0.3)  # даём свету стабилизироваться
+
         try:
             frame = self._camera.capture()
             self._state.status["camera"] = True
@@ -168,37 +154,36 @@ class SerialManager:
             logger.error("Camera capture failed: %s", e)
             self._state.status["camera"] = False
             self._emit_status()
-            self._send_drop("reject")
+            self._light_off()
+            self._send_drop("empty")
             return
 
-        # 2. Классификация
+        # Выключаем свет сразу после захвата
+        self._light_off()
+
         try:
             class_name, confidence, inference_ms = self._classifier.run(frame)
             self._state.status["nn"] = True
         except Exception as e:
-            logger.error("Classifier error: %s — sending DROP_REJ", e)
+            logger.error("Classifier error: %s", e)
             self._state.status["nn"] = False
             self._emit_status()
-            self._send_drop("reject")
+            self._send_drop("empty")
             return
 
         cycle_ms = (time.time() - t0) * 1000
 
         result = {
-            "class_name":   class_name,
-            "confidence":   round(confidence, 4),
-            "cycle_ms":     round(cycle_ms, 1),
+            "class_name": class_name,
+            "confidence": round(confidence, 4),
+            "cycle_ms": round(cycle_ms, 1),
             "inference_ms": round(inference_ms, 1),
-            "timestamp":    time.time(),
+            "timestamp": time.time(),
         }
 
-        # 3. Обновить состояние
         self._state.update(result)
-
-        # 4. Отправить команду Arduino
         self._send_drop(class_name)
 
-        # 5. Подготовить JPEG и отправить в браузер
         try:
             jpeg_bytes = self._camera.frame_to_jpeg(frame)
             image_b64 = base64.b64encode(jpeg_bytes).decode()
@@ -209,9 +194,9 @@ class SerialManager:
         snapshot = self._state.get_snapshot()
         emit_data = {
             **result,
-            "image_b64":    image_b64,
-            "counts":       snapshot["counts"],
-            "total":        snapshot["total"],
+            "image_b64": image_b64,
+            "counts": snapshot["counts"],
+            "total": snapshot["total"],
             "avg_cycle_ms": snapshot["avg_cycle_ms"],
         }
         try:
@@ -221,12 +206,10 @@ class SerialManager:
 
         logger.info(
             "Cycle done: class=%s conf=%.2f cycle=%.0f ms",
-            class_name, confidence, cycle_ms,
+            class_name,
+            confidence,
+            cycle_ms,
         )
-
-    # ──────────────────────────────────────────────
-    # Завершение работы
-    # ──────────────────────────────────────────────
 
     def close(self) -> None:
         self._running = False

@@ -3,11 +3,11 @@ Description=Conveyor Pi Sorter
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /home/pi/conveyor_pi/main.py
-WorkingDirectory=/home/pi/conveyor_pi
+ExecStart=/usr/bin/python3 /home/saiotix/conveyor_pi/main.py
+WorkingDirectory=/home/saiotix/conveyor_pi
 Restart=on-failure
 RestartSec=5
-User=pi
+User=saiotix
 StandardOutput=journal
 StandardError=journal
 
