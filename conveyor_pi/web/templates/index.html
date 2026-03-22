@@ -57,7 +57,7 @@ header{flex-shrink:0;height:var(--hdr);display:flex;align-items:center;justify-c
 .lock-ico{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:var(--muted);pointer-events:none}
 .auth-btn{background:var(--accent2);border:none;border-radius:7px;color:#fff;font-family:'Syne',sans-serif;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:6px 12px;cursor:pointer;transition:background .2s}
 .auth-btn:hover{background:var(--accent)}
-.auth-ok-badge{font-size:10px;padding:5px 9px;border-radius:6px;background:rgba(0,232,122,.1);border:1px solid rgba(0,232,122,.2);color:var(--success);display:none}
+
 
 .content{flex:1;min-height:0;display:flex;flex-direction:column}
 
@@ -140,8 +140,9 @@ header{flex-shrink:0;height:var(--hdr);display:flex;align-items:center;justify-c
 .log-err{color:var(--danger)}
 
 .demo-bar{flex-shrink:0;display:flex;gap:8px;justify-content:center;padding:6px 10px}
-.demo-btn{background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 16px;cursor:pointer;transition:all .18s}
-.demo-btn:hover{border-color:var(--accent);color:var(--accent)}
+.demo-btn{background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;padding:7px 16px;cursor:not-allowed;opacity:.32;transition:all .18s}
+.demo-btn.on{cursor:pointer;opacity:1}
+.demo-btn.on:hover{border-color:var(--accent);color:var(--accent)}
 
 @media(max-width:700px){
   .desktop-grid{display:none}
@@ -216,7 +217,7 @@ header{flex-shrink:0;height:var(--hdr);display:flex;align-items:center;justify-c
       <input class="auth-input" type="password" id="pwd" placeholder="Пароль" autocomplete="off">
     </div>
     <button class="auth-btn" onclick="tryAuth()">Войти</button>
-    <div class="auth-ok-badge" id="auth-ok">Доступ открыт</div>
+
   </div>
 </header>
 
@@ -346,7 +347,7 @@ header{flex-shrink:0;height:var(--hdr);display:flex;align-items:center;justify-c
   </div>
 
   <div class="demo-bar">
-    <button class="demo-btn" onclick="resetAll()">Сбросить сессию</button>
+    <button class="demo-btn" id="btn-reset" onclick="if(unlocked) resetAll()">Сбросить сессию</button>
   </div>
 </div>
 </div>
@@ -374,8 +375,7 @@ function tryAuth() {
   currentPassword = document.getElementById('pwd').value;
   unlocked = true;
   document.getElementById('pwd').classList.add('ok');
-  document.getElementById('auth-ok').style.display = 'block';
-  ['d-cmd-start','d-cmd-stop','mob-cmd-start','mob-cmd-stop']
+  ['d-cmd-start','d-cmd-stop','mob-cmd-start','mob-cmd-stop','btn-reset']
     .forEach(id => { const e = document.getElementById(id); if(e) e.classList.add('on'); });
   setLog('<span class="log-ok">// Доступ открыт</span>');
 }
