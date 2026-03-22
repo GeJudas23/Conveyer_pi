@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(js|ts|tsx|jsx|json|html|py|css\\)$\")"
+    ]
+  }
+}

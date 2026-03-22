@@ -63,6 +63,7 @@ def create_app(state, serial_manager):
     @app.route("/api/reset", methods=["POST"])
     def api_reset():
         state.reset()
+        socketio.emit("state_reset", {})
         return jsonify({"ok": True})
 
     @socketio.on("connect")
@@ -72,7 +73,9 @@ def create_app(state, serial_manager):
         import time
 
         time.sleep(0.2)
-        socketio.emit("status", state.status, to=request.sid)
+        snap = state.get_snapshot()
+        socketio.emit("status", snap["status"], to=request.sid)
+        socketio.emit("init_state", snap, to=request.sid)
 
     @socketio.on("disconnect")
     def on_disconnect():

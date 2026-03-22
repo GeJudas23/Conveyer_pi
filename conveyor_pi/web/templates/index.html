@@ -405,6 +405,29 @@ function sendCmd(cmd) {
 const socket = io();
 socket.on('new_result', updateUI);
 socket.on('status', updateStatus);
+socket.on('init_state', applySnapshot);
+socket.on('state_reset', resetUI);
+
+// ── mkFeedItem ────────────────────────────────────────────────
+function mkFeedItem(data) {
+  const cls = toStat(data.class_name || 'reject');
+  const cfg = CLS_CONFIG[cls];
+  const pct = Math.round((data.confidence || 0) * 100);
+  const now = new Date((data.timestamp||0)*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const d = document.createElement('div');
+  d.className = 'fi';
+  const thumbHtml = data.image_b64
+    ? `<img src="data:image/jpeg;base64,${data.image_b64}" style="width:100%;height:100%;object-fit:cover">`
+    : `<span style="font-size:9px;color:var(--muted)">—</span>`;
+  d.innerHTML =
+    `<div class="fi-thumb">${thumbHtml}</div>`+
+    `<div class="fi-info">`+
+      `<div class="fi-class" style="color:${cfg.color}">${cfg.label}</div>`+
+      `<div class="fi-meta">${now} · ${Math.round(data.cycle_ms||0)} мс · ${pct}%</div>`+
+    `</div>`+
+    `<span class="fi-badge ${cfg.badge}">${cfg.label}</span>`;
+  return d;
+}
 
 // ── updateUI ──────────────────────────────────────────────────
 function updateUI(data) {
@@ -469,29 +492,73 @@ function updateUI(data) {
   ['d-avg','mob-avg'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent=avgStr; });
 
   // Feed
-  const now = new Date(data.timestamp*1000).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const mkItem = () => {
-    const d = document.createElement('div');
-    d.className = 'fi';
-    const thumbHtml = data.image_b64
-      ? `<img src="data:image/jpeg;base64,${data.image_b64}" style="width:100%;height:100%;object-fit:cover">`
-      : `<span style="font-size:9px;color:var(--muted)">—</span>`;
-    d.innerHTML =
-      `<div class="fi-thumb">${thumbHtml}</div>`+
-      `<div class="fi-info">`+
-        `<div class="fi-class" style="color:${cfg.color}">${cfg.label}</div>`+
-        `<div class="fi-meta">${now} · ${Math.round(data.cycle_ms||0)} мс · ${pct}%</div>`+
-      `</div>`+
-      `<span class="fi-badge ${cfg.badge}">${cfg.label}</span>`;
-    return d;
-  };
-
   ['d-feed','mob-feed'].forEach((id, idx) => {
     const feed = document.getElementById(id); if(!feed) return;
     const empty = feed.querySelector('.feed-empty'); if(empty) empty.remove();
-    feed.insertBefore(mkItem(), feed.firstChild);
+    feed.insertBefore(mkFeedItem(data), feed.firstChild);
     const max = idx===0 ? 4 : 8;
     while(feed.children.length > max) feed.removeChild(feed.lastChild);
+  });
+}
+
+// ── applySnapshot (синхронизация при подключении) ─────────────
+function applySnapshot(snap) {
+  // Счётчики
+  const counts = snap.counts || {};
+  const total  = snap.total  || 0;
+  const keys = ['circle','star','heart','reject'];
+  const sfxs = ['cc','cs','ch','cr'];
+  const bsfx = ['bc','bs','bh','br'];
+  keys.forEach((key, i) => {
+    const cnt = counts[key] || 0;
+    const p   = total > 0 ? Math.round(cnt/total*100) : 0;
+    ['d-','mob-'].forEach(px => {
+      const ce = document.getElementById(px + sfxs[i]);
+      const be = document.getElementById(px + bsfx[i]);
+      if(ce) ce.textContent = cnt;
+      if(be) be.style.width = p+'%';
+    });
+  });
+  ['d-total','mob-total'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent=total; });
+  const avgStr = snap.avg_cycle_ms ? (snap.avg_cycle_ms/1000).toFixed(2)+' с' : '—';
+  ['d-avg','mob-avg'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent=avgStr; });
+
+  // Последний кадр и результат
+  const lr = snap.last_result;
+  if (lr && lr.class_name) {
+    const cls = toStat(lr.class_name);
+    const cfg = CLS_CONFIG[cls];
+    const pct = Math.round((lr.confidence || 0) * 100);
+    const clsHtml = `<span style="color:${cfg.color}">${cfg.label}</span>`;
+    ['d-class','mob-class'].forEach(id => { const e=document.getElementById(id); if(e) e.innerHTML=clsHtml; });
+    ['d-conf-fill','mob-conf-fill'].forEach(id => {
+      const e=document.getElementById(id);
+      if(e){ e.style.width=pct+'%'; e.style.background=cfg.color; e.style.boxShadow=`0 0 7px ${cfg.color}`; }
+    });
+    ['d-conf-val','mob-conf-val'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent=pct+'%'; });
+    const cycleS = lr.cycle_ms ? (lr.cycle_ms/1000).toFixed(2)+' с' : '—';
+    ['d-cycle','mob-cycle'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent=cycleS; });
+    if (lr.image_b64) {
+      ['d-snap-img','mob-snap-img'].forEach(id => {
+        const img=document.getElementById(id); if(!img) return;
+        img.src='data:image/jpeg;base64,'+lr.image_b64; img.style.display='block';
+      });
+      ['d-snap-ph','mob-snap-ph'].forEach(id => { const ph=document.getElementById(id); if(ph) ph.style.display='none'; });
+      ['d-snap-frame','mob-snap-frame'].forEach(id => {
+        const f=document.getElementById(id); if(f) f.style.borderColor=`rgba(${cfg.rgba},.4)`;
+      });
+    }
+  }
+
+  // История — заполняем ленту
+  const history = snap.history || [];
+  ['d-feed','mob-feed'].forEach((id, idx) => {
+    const feed = document.getElementById(id); if(!feed) return;
+    feed.innerHTML = '';
+    const max = idx===0 ? 4 : 8;
+    const items = history.slice(-max);
+    for (let i = items.length - 1; i >= 0; i--) feed.appendChild(mkFeedItem(items[i]));
+    if (feed.children.length === 0) feed.innerHTML = '<div class="feed-empty">Объекты ещё не поступали...</div>';
   });
 }
 
@@ -506,26 +573,28 @@ function updateStatus(data) {
   });
 }
 
-// ── Сброс ─────────────────────────────────────────────────────
-function resetAll() {
-  fetch('/api/reset', { method:'POST' }).finally(() => {
-    ['cc','cs','ch','cr'].forEach(sfx => {
-      ['d-c','mob-c'].forEach(px => { const e=document.getElementById(px+sfx.slice(1)); if(e) e.textContent='0'; });
-      ['d-b','mob-b'].forEach(px => { const e=document.getElementById(px+sfx.slice(1)); if(e) e.style.width='0%'; });
-    });
-    ['d-total','mob-total'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='0'; });
-    ['d-avg','mob-avg'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
-    ['d-class','mob-class'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
-    ['d-conf-fill','mob-conf-fill'].forEach(id => { const e=document.getElementById(id); if(e){ e.style.width='0%'; e.style.background=''; } });
-    ['d-conf-val','mob-conf-val'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
-    ['d-cycle','mob-cycle'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
-    ['d-feed','mob-feed'].forEach(id => { const e=document.getElementById(id); if(e) e.innerHTML='<div class="feed-empty">Объекты ещё не поступали...</div>'; });
-    // Сброс снимка
-    ['d-snap-img','mob-snap-img'].forEach(id => { const e=document.getElementById(id); if(e){ e.src=''; e.style.display='none'; } });
-    ['d-snap-ph','mob-snap-ph'].forEach(id => { const e=document.getElementById(id); if(e) e.style.display='flex'; });
-    ['d-snap-frame','mob-snap-frame'].forEach(id => { const e=document.getElementById(id); if(e) e.style.borderColor=''; });
-    setLog('');
+// ── Сброс UI (вызывается по событию state_reset от сервера) ───
+function resetUI() {
+  ['cc','cs','ch','cr'].forEach(sfx => {
+    ['d-c','mob-c'].forEach(px => { const e=document.getElementById(px+sfx.slice(1)); if(e) e.textContent='0'; });
+    ['d-b','mob-b'].forEach(px => { const e=document.getElementById(px+sfx.slice(1)); if(e) e.style.width='0%'; });
   });
+  ['d-total','mob-total'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='0'; });
+  ['d-avg','mob-avg'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
+  ['d-class','mob-class'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
+  ['d-conf-fill','mob-conf-fill'].forEach(id => { const e=document.getElementById(id); if(e){ e.style.width='0%'; e.style.background=''; e.style.boxShadow=''; } });
+  ['d-conf-val','mob-conf-val'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
+  ['d-cycle','mob-cycle'].forEach(id => { const e=document.getElementById(id); if(e) e.textContent='—'; });
+  ['d-feed','mob-feed'].forEach(id => { const e=document.getElementById(id); if(e) e.innerHTML='<div class="feed-empty">Объекты ещё не поступали...</div>'; });
+  ['d-snap-img','mob-snap-img'].forEach(id => { const e=document.getElementById(id); if(e){ e.src=''; e.style.display='none'; } });
+  ['d-snap-ph','mob-snap-ph'].forEach(id => { const e=document.getElementById(id); if(e) e.style.display='flex'; });
+  ['d-snap-frame','mob-snap-frame'].forEach(id => { const e=document.getElementById(id); if(e) e.style.borderColor=''; });
+  setLog('');
+}
+
+function resetAll() {
+  // Сервер сбросит state и разошлёт state_reset всем клиентам
+  fetch('/api/reset', { method:'POST' });
 }
 
 // ── Tabs ──────────────────────────────────────────────────────

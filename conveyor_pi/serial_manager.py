@@ -181,20 +181,19 @@ class SerialManager:
             "timestamp": time.time(),
         }
 
-        self._state.update(result)
-        self._send_drop(class_name)
-
         try:
             jpeg_bytes = self._camera.frame_to_jpeg(frame)
-            image_b64 = base64.b64encode(jpeg_bytes).decode()
+            result["image_b64"] = base64.b64encode(jpeg_bytes).decode()
         except Exception as e:
             logger.warning("JPEG encode failed: %s", e)
-            image_b64 = ""
+            result["image_b64"] = ""
+
+        self._state.update(result)
+        self._send_drop(class_name)
 
         snapshot = self._state.get_snapshot()
         emit_data = {
             **result,
-            "image_b64": image_b64,
             "counts": snapshot["counts"],
             "total": snapshot["total"],
             "avg_cycle_ms": snapshot["avg_cycle_ms"],
